@@ -1,0 +1,5 @@
+yfinance
+supabase
+numpy
+scipy
+python-dotenv
