@@ -86,12 +86,22 @@ export default function GEXChart({ tickerId = 1 }: { tickerId?: number }) {
           });
           setData(json);
           setError(null);
+        } else if (json.error && json.error.includes("No data")) {
+          // No data for this ticker - treat as empty state, not an error
+          console.warn(
+            "No data for ticker:",
+            tickerId,
+            "Date:",
+            selectedDate
+          );
+          setData(null);
+          setError(null);
         } else if (!response.ok) {
-          // No summary data and error response
+          // Real error (connection issue, etc)
           throw new Error(json.error || "Failed to fetch GEX data");
         } else {
-          // Response ok but no data (shouldn't happen)
-          setData(json);
+          // Response ok but no summary (shouldn't happen)
+          setData(null);
           setError(null);
         }
       } catch (err) {
@@ -133,7 +143,8 @@ export default function GEXChart({ tickerId = 1 }: { tickerId?: number }) {
   if (!data)
     return (
       <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-8 text-center text-slate-400">
-        No data available
+        <p className="mb-2">No data available for this ticker</p>
+        <p className="text-xs text-slate-500">Data will appear after the market closes and data is fetched</p>
       </div>
     );
 
