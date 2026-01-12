@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
     const tickerId = searchParams.get("ticker_id") || "1";
     const date = searchParams.get("date");
 
+    console.log(`GEX API: Fetching data for ticker=${tickerId}, date=${date}`);
+
     // Fetch summary data
     let summaryQuery = supabase
       .from("summaries")
@@ -31,9 +33,66 @@ export async function GET(request: NextRequest) {
 
     const { data: summaryData, error: summaryError } = await summaryQuery;
 
-    if (summaryError) throw summaryError;
+    if (summaryError) {
+      console.error("Summary fetch error:", summaryError);
+      throw summaryError;
+    }
 
     if (!summaryData || summaryData.length === 0) {
+      console.warn(
+        `No summary data found for ticker=${tickerId}, date=${date}`
+      );
+      // If specific date has no data, fetch latest
+      if (date) {
+        const { data: latestData, error: latestError } = await supabase
+          .from("summaries")
+          .select("*")
+          .eq("ticker_id", tickerId)
+          .order("date", { ascending: false })
+          .limit(1);
+
+        if (latestError || !latestData || latestData.length === 0) {
+          return NextResponse.json(
+            { error: "No data available for this ticker" },
+            { status: 404 }
+          );
+        }
+
+        const summary = latestData[0];
+        const queryDate = summary.date;
+
+        const { data: strikeData, error: strikeError } = await supabase
+          .from("details")
+          .select("*")
+          .eq("ticker_id", tickerId)
+          .eq("date", queryDate)
+          .order("strike", { ascending: true });
+
+        if (strikeError) throw strikeError;
+
+        const { data: priceData, error: priceError } = await supabase
+          .from("prices")
+          .select("*")
+          .eq("ticker_id", tickerId)
+          .eq("date", queryDate);
+
+        if (priceError) throw priceError;
+
+        const price =
+          priceData && priceData.length > 0 ? priceData[0].price : null;
+
+        return NextResponse.json({
+          summary: {
+            total_gex: summary.total_gex,
+            flip_price: summary.flip_price,
+            percentile: summary.percentile,
+            date: summary.date,
+          },
+          price,
+          strikes: strikeData || [],
+        });
+      }
+
       return NextResponse.json(
         { error: "No summary data found" },
         { status: 404 }

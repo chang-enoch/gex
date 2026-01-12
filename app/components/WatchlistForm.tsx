@@ -20,6 +20,7 @@ export default function WatchlistForm({
     type: "success" | "error";
     text: string;
   } | null>(null);
+  const [draggedId, setDraggedId] = useState<number | null>(null);
 
   // Fetch watchlist on mount
   useEffect(() => {
@@ -117,6 +118,34 @@ export default function WatchlistForm({
     }
   };
 
+  const handleDragStart = (e: React.DragEvent, id: number) => {
+    setDraggedId(id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDropOnTicker = (e: React.DragEvent, targetId: number) => {
+    e.preventDefault();
+    if (draggedId === null || draggedId === targetId) {
+      setDraggedId(null);
+      return;
+    }
+
+    const draggedIndex = tickers.findIndex((t) => t.id === draggedId);
+    const targetIndex = tickers.findIndex((t) => t.id === targetId);
+
+    const newTickers = [...tickers];
+    const [draggedItem] = newTickers.splice(draggedIndex, 1);
+    newTickers.splice(targetIndex, 0, draggedItem);
+
+    setTickers(newTickers);
+    setDraggedId(null);
+  };
+
   return (
     <div className="sticky top-20 space-y-4">
       {/* Header */}
@@ -173,20 +202,31 @@ export default function WatchlistForm({
             {tickers.map((t) => (
               <div
                 key={t.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, t.id)}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDropOnTicker(e, t.id)}
                 onClick={() => handleSelectTicker(t.id)}
-                className={`flex items-center justify-between px-4 py-3 rounded-lg border transition group cursor-pointer ${
+                className={`flex items-center justify-between px-4 py-3 rounded-lg border transition group cursor-move ${
+                  draggedId === t.id ? "opacity-50" : ""
+                } ${
                   selectedId === t.id
                     ? "bg-yellow-900/30 border-yellow-500 shadow-lg shadow-yellow-500/20"
                     : "bg-gray-800/50 border-yellow-900/20 hover:bg-gray-700/50 hover:border-yellow-700/40"
                 }`}
               >
-                <span
-                  className={`font-semibold ${
-                    selectedId === t.id ? "text-yellow-300" : "text-yellow-400"
-                  }`}
-                >
-                  {t.ticker}
-                </span>
+                <div className="flex items-center gap-3 flex-1">
+                  <span className="text-yellow-700 opacity-50 text-sm">⋮⋮</span>
+                  <span
+                    className={`font-semibold ${
+                      selectedId === t.id
+                        ? "text-yellow-300"
+                        : "text-yellow-400"
+                    }`}
+                  >
+                    {t.ticker}
+                  </span>
+                </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

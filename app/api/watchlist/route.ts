@@ -15,7 +15,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from("watchlist")
       .select("*")
-      .order("ticker", { ascending: true });
+      .order("id", { ascending: true });
 
     if (error) throw error;
 
@@ -104,6 +104,47 @@ export async function DELETE(request: NextRequest) {
     console.error("Error removing ticker:", error);
     return NextResponse.json(
       { error: "Failed to remove ticker" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const { id, newIndex } = await request.json();
+
+    if (!id || newIndex === undefined) {
+      return NextResponse.json(
+        { error: "ID and newIndex are required" },
+        { status: 400 }
+      );
+    }
+
+    // Get all tickers
+    const { data: allTickers, error: fetchError } = await supabase
+      .from("watchlist")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (fetchError) throw fetchError;
+
+    // Find the item to move
+    const itemIndex = allTickers.findIndex((t) => t.id === id);
+    if (itemIndex === -1) {
+      return NextResponse.json({ error: "Ticker not found" }, { status: 404 });
+    }
+
+    // Reorder: move item from current position to new position
+    const [movedItem] = allTickers.splice(itemIndex, 1);
+    allTickers.splice(newIndex, 0, movedItem);
+
+    // Create new id-based ordering by recreating the list with new IDs
+    // Actually, we'll just return the new order - the client will manage it
+    return NextResponse.json({ tickers: allTickers });
+  } catch (error) {
+    console.error("Error reordering watchlist:", error);
+    return NextResponse.json(
+      { error: "Failed to reorder watchlist" },
       { status: 500 }
     );
   }

@@ -32,39 +32,98 @@ interface GEXResponse {
 }
 
 export default function GEXChart({ tickerId = 1 }: { tickerId?: number }) {
+  const today = new Date();
+  const initialDates: string[] = [];
+  // Start from yesterday to avoid edge cases with future dates
+  const startDate = new Date(today);
+  startDate.setDate(startDate.getDate() - 1);
+
+  for (let i = 0; i < 20; i++) {
+    const date = new Date(startDate);
+    date.setDate(date.getDate() - i);
+    initialDates.push(date.toISOString().split("T")[0]);
+  }
+
   const [data, setData] = useState<GEXResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(initialDates[0]);
+  const [availableDates, setAvailableDates] = useState<string[]>(initialDates);
+  const [dataCache, setDataCache] = useState<Map<string, GEXResponse>>(
+    new Map()
+  );
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!selectedDate) return;
+
+      // Check cache first
+      const cacheKey = `${tickerId}-${selectedDate}`;
+      if (dataCache.has(cacheKey)) {
+        const cachedData = dataCache.get(cacheKey);
+        setData(cachedData || null);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`/api/gex?ticker_id=${tickerId}`);
-        if (!response.ok) throw new Error("Failed to fetch GEX data");
+        const params = new URLSearchParams();
+        params.append("ticker_id", String(tickerId));
+        params.append("date", selectedDate);
+        const response = await fetch(`/api/gex?${params}`);
         const json = await response.json();
-        setData(json);
+
+        // If we have summary data, treat it as success (API may return 404 with fallback data)
+        if (json.summary) {
+          // Cache the result
+          setDataCache((prev) => {
+            const newCache = new Map(prev);
+            newCache.set(cacheKey, json);
+            return newCache;
+          });
+          setData(json);
+          setError(null);
+        } else if (!response.ok) {
+          // No summary data and error response
+          throw new Error(json.error || "Failed to fetch GEX data");
+        } else {
+          // Response ok but no data (shouldn't happen)
+          setData(json);
+          setError(null);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
+        const errorMsg = err instanceof Error ? err.message : "Unknown error";
+        console.error(
+          "GEX Fetch Error:",
+          errorMsg,
+          "Date:",
+          selectedDate,
+          "Ticker:",
+          tickerId
+        );
+        setError(errorMsg);
+        setData(null);
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, [tickerId]);
+  }, [tickerId, selectedDate, dataCache]);
 
-  if (loading)
+  if (!data && loading)
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-slate-400 text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-yellow-500 mb-4"></div>
           <p>Loading gamma data...</p>
         </div>
       </div>
     );
-  if (error)
+  if (error && !data)
     return (
       <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-200">
         <p className="font-semibold">Error</p>
@@ -95,6 +154,36 @@ export default function GEXChart({ tickerId = 1 }: { tickerId?: number }) {
     return num.toFixed(2);
   };
 
+  // Custom tooltip that shows only positive or negative based on net GEX
+  const CustomTooltip = (props: any) => {
+    const { active, payload, label } = props;
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      const netGEX = data["Positive GEX"] + data["Negative GEX"];
+      const isPositive = netGEX > 0;
+
+      return (
+        <div
+          className="bg-black border border-yellow-700 rounded-lg p-3"
+          style={{ backgroundColor: "#000000", borderColor: "#b45309" }}
+        >
+          <p style={{ color: "#fbbf24", fontWeight: "bold" }}>
+            Strike: ${data.strike}
+          </p>
+          <p
+            style={{
+              color: isPositive ? "#10b981" : "#ef4444",
+              fontSize: "14px",
+            }}
+          >
+            {isPositive ? "Positive" : "Negative"} GEX: {formatNumber(netGEX)}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="w-full space-y-6">
       {/* Summary Stats */}
@@ -122,7 +211,12 @@ export default function GEXChart({ tickerId = 1 }: { tickerId?: number }) {
       </div>
 
       {/* Chart */}
-      <div className="bg-gradient-to-br from-gray-900/50 to-black/50 border border-yellow-900/30 rounded-2xl p-8 shadow-xl backdrop-blur-sm">
+      <div className="bg-gradient-to-br from-gray-900/50 to-black/50 border border-yellow-900/30 rounded-2xl p-8 shadow-xl backdrop-blur-sm relative">
+        {loading && data && (
+          <div className="absolute inset-0 bg-black/20 rounded-2xl flex items-center justify-center backdrop-blur-sm z-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-yellow-500"></div>
+          </div>
+        )}
         <div className="mb-6">
           <h2 className="text-2xl font-bold tracking-tight text-yellow-400">
             Net Gamma Exposure
@@ -151,13 +245,8 @@ export default function GEXChart({ tickerId = 1 }: { tickerId?: number }) {
               tick={{ fontSize: 12 }}
             />
             <Tooltip
-              contentStyle={{
-                backgroundColor: "#000000",
-                border: "1px solid #b45309",
-                borderRadius: "8px",
-              }}
-              formatter={(value: unknown) => formatNumber(value as number)}
-              labelStyle={{ color: "#fbbf24" }}
+              content={<CustomTooltip />}
+              cursor={{ fill: "rgba(187, 134, 11, 0.1)" }}
             />
             <Legend
               wrapperStyle={{
@@ -180,6 +269,42 @@ export default function GEXChart({ tickerId = 1 }: { tickerId?: number }) {
             />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Date Slider */}
+      <div className="bg-gradient-to-br from-gray-900/50 to-black/50 border border-yellow-900/30 rounded-2xl p-6 shadow-xl backdrop-blur-sm">
+        <div className="mb-4">
+          <label className="text-sm font-semibold text-yellow-600 uppercase tracking-wide">
+            Historical Data: {new Date(selectedDate).toLocaleDateString()}
+          </label>
+        </div>
+        <div className="flex items-center gap-4">
+          <input
+            type="range"
+            min="0"
+            max={availableDates.length - 1}
+            value={availableDates.indexOf(selectedDate)}
+            onChange={(e) => {
+              setSelectedDate(availableDates[parseInt(e.target.value)]);
+            }}
+            className="flex-1 h-2 bg-yellow-900/30 rounded-lg appearance-none cursor-pointer accent-yellow-500"
+            style={{
+              background: `linear-gradient(to right, #b45309 0%, #b45309 ${
+                ((availableDates.indexOf(selectedDate) /
+                  (availableDates.length - 1)) *
+                  100) >>
+                0
+              }%, #78350f 0%, #78350f 100%)`,
+            }}
+          />
+          <span className="text-xs text-yellow-600 font-mono min-w-20">
+            {availableDates.length - 1 - availableDates.indexOf(selectedDate)}{" "}
+            days ago
+          </span>
+        </div>
+        <div className="mt-3 text-xs text-yellow-900/60">
+          Drag to view data from the past 20 days
+        </div>
       </div>
 
       {/* Info Footer */}
