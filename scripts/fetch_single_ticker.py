@@ -177,6 +177,17 @@ try:
         for s, g in strike_map.items() 
         if spot * 0.85 <= s <= spot * 1.15  # Filter +/- 15% range
     ]
+    
+    # Deduplicate strikes by summing net_gex for same strike
+    strikes_dict = {}
+    for strike_record in strikes:
+        strike_key = strike_record["strike"]
+        if strike_key not in strikes_dict:
+            strikes_dict[strike_key] = strike_record
+        else:
+            strikes_dict[strike_key]["net_gex"] += strike_record["net_gex"]
+    
+    strikes = list(strikes_dict.values())
 
     # Save to Supabase
     try:
@@ -185,15 +196,29 @@ try:
         price_clean = clean_nan(price)
         strikes_clean = clean_nan(strikes)
 
-        # 1. Insert Summary
-        supabase.table("summaries").insert(summary_clean).execute()
+        # Delete existing data for today to allow updates
+        try:
+            supabase.table("summaries").delete().eq("ticker_id", ticker_id).eq("date", today_str).execute()
+        except:
+            pass
+        try:
+            supabase.table("prices").delete().eq("ticker_id", ticker_id).eq("date", today_str).execute()
+        except:
+            pass
+        try:
+            supabase.table("details").delete().eq("ticker_id", ticker_id).eq("date", today_str).execute()
+        except:
+            pass
+
+        # 1. Insert Summary (with upsert)
+        supabase.table("summaries").upsert(summary_clean, ignore_duplicates=False).execute()
         
-        # 2. Insert Price
-        supabase.table("prices").insert(price_clean).execute()
+        # 2. Insert Price (with upsert)
+        supabase.table("prices").upsert(price_clean, ignore_duplicates=False).execute()
         
-        # 3. Batch Insert Strikes
+        # 3. Batch Insert Strikes (with upsert)
         if strikes_clean:
-            supabase.table("details").insert(strikes_clean).execute()
+            supabase.table("details").upsert(strikes_clean, ignore_duplicates=False).execute()
         
         print(f"✅ Data saved for {ticker_sym}")
     except Exception as e:
